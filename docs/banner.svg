@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 400" width="1280" height="400" role="img" aria-label="tripcut: a pile of random clips becomes one edited story">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="warm" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f97316"/>
+      <stop offset="1" stop-color="#ec4899"/>
+    </linearGradient>
+    <linearGradient id="c1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient>
+    <linearGradient id="c2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fbbf24"/><stop offset="1" stop-color="#f97316"/></linearGradient>
+    <linearGradient id="c3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a3e635"/><stop offset="1" stop-color="#22c55e"/></linearGradient>
+    <linearGradient id="c4" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f472b6"/><stop offset="1" stop-color="#db2777"/></linearGradient>
+  </defs>
+  <rect width="1280" height="400" fill="url(#bg)"/>
+
+  <!-- messy pile of clips -->
+  <g opacity="0.95">
+    <rect x="70"  y="120" width="150" height="90" rx="10" fill="url(#c1)" transform="rotate(-9 145 165)"/>
+    <rect x="175" y="200" width="150" height="90" rx="10" fill="url(#c2)" transform="rotate(7 250 245)"/>
+    <rect x="95"  y="245" width="150" height="90" rx="10" fill="url(#c3)" transform="rotate(-4 170 290)"/>
+    <rect x="210" y="95"  width="150" height="90" rx="10" fill="url(#c4)" transform="rotate(11 285 140)"/>
+    <rect x="150" y="160" width="150" height="90" rx="10" fill="url(#c1)" opacity="0.7" transform="rotate(3 225 205)"/>
+  </g>
+  <text x="215" y="372" fill="#94a3b8" font-family="Inter, Helvetica, Arial, sans-serif" font-size="20" text-anchor="middle">200 random clips</text>
+
+  <!-- arrow through the "AI" -->
+  <path d="M410 205 H520" stroke="#64748b" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="585" cy="205" r="62" fill="none" stroke="url(#warm)" stroke-width="5"/>
+  <path d="M560 180 L560 230 L605 205 Z" fill="url(#warm)"/>
+  <path d="M650 205 H760" stroke="#64748b" stroke-width="4" stroke-linecap="round"/>
+  <path d="M748 193 L762 205 L748 217" fill="none" stroke="#64748b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="585" y="300" fill="#94a3b8" font-family="Inter, Helvetica, Arial, sans-serif" font-size="20" text-anchor="middle">watches · plans · cuts</text>
+
+  <!-- ordered timeline -->
+  <g>
+    <rect x="800" y="170" width="76"  height="70" rx="6" fill="url(#c3)"/>
+    <rect x="880" y="170" width="120" height="70" rx="6" fill="url(#c1)"/>
+    <rect x="1004" y="170" width="54" height="70" rx="6" fill="url(#c2)"/>
+    <rect x="1062" y="170" width="98" height="70" rx="6" fill="url(#c4)"/>
+    <rect x="1164" y="170" width="46" height="70" rx="6" fill="url(#c2)"/>
+    <rect x="800" y="252" width="410" height="8" rx="4" fill="#334155"/>
+    <rect x="800" y="252" width="260" height="8" rx="4" fill="url(#warm)"/>
+  </g>
+  <text x="1005" y="372" fill="#94a3b8" font-family="Inter, Helvetica, Arial, sans-serif" font-size="20" text-anchor="middle">one story</text>
+
+  <text x="640" y="72" fill="#f8fafc" font-family="Inter, Helvetica, Arial, sans-serif" font-size="52" font-weight="800" text-anchor="middle" letter-spacing="-1">trip<tspan fill="url(#warm)">cut</tspan></text>
+</svg>

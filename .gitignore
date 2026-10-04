@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.tripcut/
+*.mp4
+*.mov
+*.insv
+*.lrv
+.env
+.DS_Store
