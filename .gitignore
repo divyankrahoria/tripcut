@@ -14,3 +14,5 @@ dist/
 *.lrv
 .env
 .DS_Store
+CLAUDE.md
+.claude/

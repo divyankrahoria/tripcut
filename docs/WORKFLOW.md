@@ -10,23 +10,23 @@ You review, tweak, and export.
 
 ```mermaid
 flowchart TD
-    A["📷 SD card<br/>DCIM/Camera01"] --> Q{"What are the video files?"}
-    Q -->|".mp4: flat camera"| M["💾 Copy VID_*.mp4 straight to Mac<br/>skip .lrv and .jpg"]
-    Q -->|".insv: 360° camera"| B["💾 Copy raw files to Mac<br/>Trips/TRIP/1-raw"]
+    A["SD card<br/>DCIM/Camera01"] --> Q{"What are the video files?"}
+    Q -->|".mp4: flat camera"| M["Copy VID_*.mp4 straight to Mac<br/>skip .lrv and .jpg"]
+    Q -->|".insv: 360° camera"| B["Copy raw files to Mac<br/>Trips/TRIP/1-raw"]
     B --> C{"Reframe 360 → flat video"}
-    C -->|"Mac (recommended)"| D["🖥️ Insta360 Studio<br/>Auto Frame / keyframes<br/>Export as reframed H.264"]
-    C -->|"Phone"| E["📱 Insta360 app<br/>Auto Frame<br/>Export to Phone → AirDrop"]
-    M --> F["📁 Trips/TRIP/2-clips<br/>flat MP4s, one trip"]
+    C -->|"Mac (recommended)"| D["Insta360 Studio<br/>Auto Frame / keyframes<br/>Export as reframed H.264"]
+    C -->|"Phone"| E["Insta360 app<br/>Auto Frame<br/>Export to Phone → AirDrop"]
+    M --> F["Trips/TRIP/2-clips<br/>flat MP4s, one trip"]
     D --> F
     E --> F
-    F --> G["🔎 tripcut analyze + plan<br/>Gemini watches every clip"]
-    G --> H["📝 2-clips/.tripcut/<br/>analysis/*.json<br/>storyboard.md · plan.json"]
-    H --> I["🤖 Claude Code<br/>reads the notes"]
+    F --> G["tripcut analyze + plan<br/>Gemini watches every clip"]
+    G --> H["2-clips/.tripcut/<br/>analysis/*.json<br/>storyboard.md · plan.json"]
+    H --> I["Claude Code<br/>reads the notes"]
     F --> J
-    I -->|"MCP"| J["🎬 Palmier<br/>imports clips, builds the timeline"]
+    I -->|"MCP"| J["Palmier<br/>imports clips, builds the timeline"]
     J --> K{"Happy with the cut?"}
     K -->|"No: ask Claude or edit by hand"| J
-    K -->|"Yes"| L["✅ Export<br/>Trips/TRIP/3-final/TRIP.mp4"]
+    K -->|"Yes"| L["Export<br/>Trips/TRIP/3-final/TRIP.mp4"]
 ```
 
 > The diagram renders on GitHub. In VS Code, install the
@@ -123,7 +123,7 @@ Files land straight in the right folder, and you choose the codec.
    - To export several clips at once, tap the **check icon** at the top right of the Album page, select the clips, then tap **Export to Phone**. The defaults are 1080p, 30 fps, 25 Mbps.
 3. AirDrop the videos to your Mac and move them into `2-clips`.
 
-> ⚠️ Phone exports and AirDrop can change file names and dates, and tripcut uses those to
+> Phone exports and AirDrop can change file names and dates, and tripcut uses those to
 > put the trip in order. If clips come out of order, use Option A, or tell Claude the right order.
 
 ### Don'ts
