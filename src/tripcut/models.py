@@ -26,6 +26,12 @@ class ClipInfo:
     is_360: bool = False
 
     @property
+    def orientation(self) -> str:
+        if self.height > self.width:
+            return "vertical"
+        return "square" if self.height == self.width else "horizontal"
+
+    @property
     def created_dt(self) -> datetime | None:
         if not self.created_at:
             return None
@@ -49,6 +55,16 @@ class Moment:
     kind: str = "broll"  # "speech" | "broll"
     description: str = ""
     score: float = 5.0  # 1-10, how good / important this moment is
+    shot: str = ""  # wide | medium | close | detail ("" = unknown, e.g. local provider)
+    motion: str = ""  # static | pan | tilt | zoom | walking | handheld
+    subject: str = ""  # what's in frame, a few words ("Watchman peak")
+    audio: str = ""  # speech | ambient | music | plain | noisy
+    framing: str = ""  # upright | tilted | sideways | upside_down
+    stability: str = ""  # steady | slight_shake | shaky
+    exposure: str = ""  # good | bright | dark | backlit
+    energy: str = ""  # calm | lively | intense
+    tone: str = ""  # scenic | fun | adventure | chill | warm
+    peak: float | None = None  # the single best instant (seconds); keep it when trimming shorter
 
     @property
     def duration(self) -> float:
@@ -73,6 +89,12 @@ class ClipAnalysis:
     moments: list[Moment] = field(default_factory=list)
     quality_issues: list[str] = field(default_factory=list)
     provider: str = ""
+    time_of_day: str = ""  # dawn | morning | midday | afternoon | golden_hour | dusk | night | indoors
+    people: list[str] = field(default_factory=list)  # who appears or speaks
+    usable: bool = True  # False when nothing in the clip is worth cutting to
+    visible_text: list[str] = field(default_factory=list)  # readable signs, with times
+    # Cut points between scenes: {"start", "end", "type": whip_pan | wipe | reveal, "note"}
+    transitions: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -89,6 +111,11 @@ class ClipAnalysis:
             moments=[Moment(**m) for m in d.get("moments", [])],
             quality_issues=list(d.get("quality_issues", [])),
             provider=d.get("provider", ""),
+            time_of_day=d.get("time_of_day", ""),
+            people=list(d.get("people", [])),
+            usable=bool(d.get("usable", True)),
+            visible_text=list(d.get("visible_text", [])),
+            transitions=list(d.get("transitions", [])),
         )
 
 

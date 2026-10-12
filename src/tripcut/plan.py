@@ -162,7 +162,7 @@ def ai_plan(
         if not a or c.is_360:
             continue
         d = a.to_dict()
-        d.update(name=c.name, created=c.created_at, duration=c.duration, gps=c.location)
+        d.update(name=c.name, created=c.created_at, duration=c.duration, gps=c.location, orientation=c.orientation)
         entries.append(d)
     prompt = PLAN_PROMPT.format(
         target=target,

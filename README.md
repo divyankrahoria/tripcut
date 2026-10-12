@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/OWNER/tripcut/actions/workflows/ci.yml"><img src="https://github.com/OWNER/tripcut/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/divyankrahoria/tripcut/actions/workflows/ci.yml"><img src="https://github.com/divyankrahoria/tripcut/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT">
   <img src="https://img.shields.io/badge/powered%20by-Gemini%20%2B%20FFmpeg-orange" alt="Gemini + FFmpeg">
@@ -44,7 +44,7 @@ Unlike template-based auto-editors that only score how a shot *looks*, tripcut u
 
 ```bash
 brew install ffmpeg          # macOS (Ubuntu: sudo apt install ffmpeg, Windows: winget install ffmpeg)
-pip install git+https://github.com/OWNER/tripcut
+pip install git+https://github.com/divyankrahoria/tripcut
 ```
 
 **2. Get a free Gemini API key** at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (Google account only, takes about a minute)
@@ -85,6 +85,61 @@ flowchart LR
 4. **Validate.** The AI's plan is checked against the real footage: times are clamped to clip lengths, too-short shots are dropped, back-to-back pieces of one shot are merged, and b-roll (never speech) is trimmed if the cut runs long.
 5. **Render.** FFmpeg crops each shot to your aspect ratio, joins them with clean cuts and click-free audio, burns in styled captions, and mixes your music, ducking it automatically while you talk.
 
+## 🤖 Edit in Palmier Pro with Claude
+
+For a hand-finished film, use tripcut as the eyes and let Claude do the editing. Gemini logs every clip once; [Claude Code](https://claude.com/claude-code) reads that log and drives **Palmier Pro** through its MCP server to cut, grade, title and export. You review in Palmier and ask for changes in plain English.
+
+```mermaid
+flowchart LR
+    subgraph T["tripcut"]
+        A[📷 Camera / SD card<br/><sub>read in place, no copying</sub>] --> B[🔍 Scan + 480p proxies]
+        B --> C[👀 Gemini<br/><sub>moments, scores, transcript,<br/>location per clip</sub>]
+        C --> D[(📒 .tripcut/analysis<br/><sub>cached JSON log</sub>)]
+    end
+
+    subgraph E["Claude Code"]
+        D --> F[🧠 Claude<br/><sub>picks shots, builds the story,<br/>times cuts to the music's beat</sub>]
+    end
+
+    subgraph P["Palmier Pro (via MCP)"]
+        F -- "import · place clips · trim<br/>crop · color · titles · audio mix" --> G[🎞️ Timeline]
+        G -- "capture frames" --> F
+        G --> H[📦 ProRes master]
+    end
+
+    U((🙋 You)) -- "review + feedback" --> F
+    H --> I[✨ tripcut finish<br/><sub>10-bit HEVC, −14 LUFS</sub>]
+    I --> J[🎬 final.mp4 + .srt]
+```
+
+1. **Watch once.** `tripcut analyze <folder> -S /Volumes/<card>/DCIM/Camera01` sends a small proxy of each clip to Gemini and caches what it finds. Nothing is re-uploaded later.
+2. **Claude edits.** Claude reads the log, chooses the best moments, and builds the timeline in Palmier through MCP. It checks its own work by capturing frames from the timeline.
+3. **You direct.** Watch the cut in Palmier and say what to change ("drop the shaky shot of the bridge", "no subtitles burned in"). Claude makes the edits.
+4. **Finish.** Palmier exports a ProRes master; `tripcut finish` turns it into a 10-bit HEVC MP4 with loudness-matched sound, plus subtitles as a separate `.srt`.
+
+See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the full step-by-step.
+
+### Why Gemini for the first pass?
+
+Claude can't watch video. It sees still frames and reads transcripts, so it could in principle find moments on its own using Palmier's transcripts plus contact sheets of sampled frames. Here is how the two compare, based on editing a real multi-day trip (about 2 hours of footage, roughly 190 clips) with Gemini doing the first pass and Claude + Palmier doing the edit. These are observations from that use, not a controlled benchmark:
+
+| | Gemini (via tripcut) | Claude + Palmier Pro |
+|---|---|---|
+| **Hears sound** (laughter, wind, waterfalls, music) | ✅ Listens to the actual audio | ❌ Only reads the transcript |
+| **Sees movement** (pans, tilts, reveals, shake) | ✅ Watches the actual video | ⚠️ Infers it from still frames |
+| **Judging shot quality** | ⚠️ Scores run generous; some top picks were unusable | ✅ Catches what the scores miss (a finger over the lens, subjects cut off by a vertical crop) |
+| **Transcript accuracy** | ❌ Timestamps drift 0.5–3 s; uncommon names misheard | ✅ Word-accurate (Palmier transcripts or Whisper) |
+| **Claude usage** | ✅ None for the first pass | ❌ Roughly 250–330 contact-sheet images per 2 hours of footage (estimate) |
+| **Cost** | ✅ Low with a Flash model | ⚠️ Comes out of your Claude plan's allowance |
+| **Many clips read over USB** | ✅ Reads the camera directly, 4 clips at a time, falls back to a second model when busy | ❌ Importing everything into the editor first was fragile |
+| **Reuse** | ✅ Cached once as JSON, works with any editor | ⚠️ Tied to one editor |
+| **Privacy** | ❌ Small 480p copies of your clips are uploaded to Google (deleted right after analysis) | ✅ Everything stays on your machine |
+| **Setup** | ❌ Needs a Gemini API key with billing | ✅ Nothing extra |
+
+**Takeaway:** Gemini is good at *finding* moments, especially anything involving sound or movement, and it's cheap. Claude is better at *choosing* between them. So tripcut uses Gemini to make a searchable log of the whole trip, and Claude checks real frames before anything goes on the timeline.
+
+> **Privacy note:** if you'd rather nothing leaves your machine, use `--provider local` for a heuristic first pass, or skip tripcut's analysis and let Claude work from Palmier's transcripts and frames.
+
 ## 🎛️ Commands
 
 ```bash
@@ -92,6 +147,7 @@ tripcut run     <folder>   # everything: scan → watch → plan → render
 tripcut analyze <folder>   # just watch, and print a table of what's in every clip
 tripcut plan    <folder>   # write plan.json + storyboard + EDL, no render
 tripcut render  <folder>   # render from (your edited) plan.json
+tripcut finish  <master.mov> [more parts…] -o final.mp4   # editor export → 10-bit HEVC, sound mastered to -14 LUFS
 ```
 
 Useful options:
@@ -105,8 +161,10 @@ Useful options:
 | `--subtitles` | off | Burn in what you say |
 | `--no-captions` | captions on | Skip the title and place-name captions |
 | `-p, --provider` | `gemini` | `gemini` or `local` (no AI, no upload) |
-| `--model` | `gemini-2.5-flash` | Any Gemini model, or set `TRIPCUT_MODEL` |
+| `--model` | `gemini-3.8-flash` | Any Gemini model, or set `TRIPCUT_MODEL` |
 | `--quality` | `1080` | Short side in pixels; `720` renders faster |
+| `-S, --source` | the folder itself | Read clips from a camera / SD card instead (repeatable); notes stay in the folder |
+| `--from`, `--to` | all dates | Only clips recorded in this date range (`YYYY-MM-DD`) |
 
 ## ✏️ Human in the loop
 
@@ -159,7 +217,7 @@ Ideas and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## 🛠️ Development
 
 ```bash
-git clone https://github.com/OWNER/tripcut && cd tripcut
+git clone https://github.com/divyankrahoria/tripcut && cd tripcut
 pip install -e ".[dev]"
 pytest            # generates synthetic clips with FFmpeg, no API key needed
 ruff check . && ruff format --check .

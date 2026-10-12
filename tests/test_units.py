@@ -1,8 +1,11 @@
+from datetime import datetime
+
 from tripcut.analyze import analysis_from_json, extract_json, to_seconds
 from tripcut.export import to_ass, to_edl, to_srt, transcript_on_timeline
 from tripcut.models import ClipAnalysis, ClipInfo, EditPlan, Moment, Segment, TranscriptLine
 from tripcut.plan import ai_plan, heuristic_plan, validate_plan
-from tripcut.probe import sort_chronologically, timestamp_from_filename
+from tripcut.probe import recording_time, sort_chronologically, timestamp_from_filename
+from tripcut.prompts import clip_log
 
 
 def clip(name, dur=20.0, when="2026-09-12T10:00:00", **kw):
@@ -56,11 +59,137 @@ def test_analysis_from_json_clamps_and_cleans():
     assert a.transcript[0].text == "hi"
 
 
+def test_analysis_reads_editing_fields():
+    c = clip("a.mp4", dur=30)
+    raw = {
+        "time_of_day": "Golden hour",
+        "people": ["companion, called Sam"],
+        "usable": False,
+        "visible_text": ["Zion National Park sign 12.0-17.0"],
+        "moments": [
+            {"start": 6.8, "end": 17, "kind": "broll", "shot": "WIDE", "motion": "pan", "subject": " Watchman peak ",
+             "audio": "ambient", "framing": "Upside down", "stability": "slight-shake", "exposure": "backlit",
+             "energy": "calm", "peak": 12.5, "description": "patio view", "score": 8},
+            {"start": 20, "end": 25, "kind": "broll", "shot": "drone", "motion": "dolly", "audio": "radio",
+             "framing": "diagonal", "peak": 99, "description": "unknown labels", "score": 5},
+        ],
+    }  # fmt: skip
+    a = analysis_from_json(raw, c, "test")
+    assert (a.time_of_day, a.people, a.usable) == ("golden_hour", ["companion, called Sam"], False)
+    assert a.visible_text == ["Zion National Park sign 12.0-17.0"]
+    m, odd = a.moments
+    assert (m.shot, m.motion, m.subject, m.audio) == ("wide", "pan", "Watchman peak", "ambient")
+    assert (m.framing, m.stability, m.exposure, m.energy, m.peak) == (
+        "upside_down",
+        "slight_shake",
+        "backlit",
+        "calm",
+        12.5,
+    )
+    # Labels outside the schema are dropped, not guessed; a peak outside its moment is pulled back inside.
+    assert (odd.shot, odd.motion, odd.audio, odd.framing) == ("", "", "", "")
+    assert odd.peak == 25
+    assert analysis_from_json({}, c, "t").usable is True  # missing means usable
+    # Fumbling talk gets its own label so it can be muted under music instead of kept.
+    fumble = {"moments": [{"start": 0, "end": 4.5, "kind": "broll", "audio": "Chatter", "tone": "Fun"}]}
+    fm = analysis_from_json(fumble, c, "t").moments[0]
+    assert (fm.audio, fm.tone) == ("chatter", "fun")
+
+    # Transitions: known types kept and time-clamped, unknown ones dropped, sorted by time.
+    raw = {
+        "transitions": [
+            {"start": 20, "end": 99, "type": "reveal", "note": "out the door"},
+            {"start": 5.5, "end": 6.2, "type": "Whip pan", "note": "fast swing right"},
+            {"start": 9, "end": 10, "type": "star_wipe", "note": "no"},
+        ]
+    }
+    assert analysis_from_json(raw, c, "t").transitions == [
+        {"start": 5.5, "end": 6.2, "type": "whip_pan", "note": "fast swing right"},
+        {"start": 20, "end": 30, "type": "reveal", "note": "out the door"},
+    ]
+
+    # Round-trips through the cache, and old cache files without the new fields still load.
+    assert ClipAnalysis.from_dict(a.to_dict()) == a
+    old = ClipAnalysis.from_dict({"clip": "a.mp4", "moments": [{"start": 1, "end": 3}]})
+    assert old.moments[0].shot == "" and old.usable is True
+
+
+def test_clip_log_shows_editing_fields():
+    a = ClipAnalysis(
+        "a.mp4",
+        summary="hotel patio",
+        time_of_day="midday",
+        people=["companion, called Sam"],
+        moments=[
+            Moment(6.8, 17, "broll", "patio view", 8, "wide", "static", "Watchman peak", "ambient"),
+            Moment(
+                20,
+                25,
+                "broll",
+                "cliff",
+                6,
+                "close",
+                "zoom",
+                "cliff face",
+                "plain",
+                "tilted",
+                "steady",
+                "backlit",
+                "calm",
+                peak=22.4,
+            ),
+        ],  # fmt: skip
+        usable=False,
+        visible_text=["Zion sign 12.0-17.0"],
+    )
+    d = a.to_dict()
+    d.update(name="a.mp4", created="2026-09-04T14:18:46-07:00", duration=27.7, orientation="vertical")
+    log = clip_log([d])
+    assert "| vertical | midday" in log and "UNUSABLE" in log and "people: companion, called Sam" in log
+    assert "signs: Zion sign 12.0-17.0" in log
+    assert "- [6.8-17.0] broll wide/static audio=ambient score=8: Watchman peak: patio view" in log
+    # Only what needs attention is flagged (tilted, backlit), not the norm (steady).
+    assert (
+        "- [20.0-25.0] broll close/zoom calm audio=plain score=6 peak=22.4 [tilted, backlit]: cliff face: cliff" in log
+    )
+    d["orientation"] = "horizontal"
+    assert "horizontal" not in clip_log([d])
+
+    d["moments"][0]["tone"] = "fun"
+    d["transitions"] = [{"start": 5.5, "end": 6.2, "type": "whip_pan", "note": "fast swing right"}]
+    log = clip_log([d])
+    assert "transitions: whip_pan 5.5-6.2 (fast swing right)" in log
+    assert "broll wide/static fun audio=ambient" in log
+
+
 def test_filename_timestamps_and_ordering():
     assert timestamp_from_filename("VID_20260913_181500_00_007.mp4").hour == 18
     assert timestamp_from_filename("IMG_1234.mp4") is None
     clips = [clip("b", when="2026-09-13T09:00:00"), clip("c", when=None), clip("a", when="2026-09-12T09:00:00")]
     assert [c.name for c in sort_chronologically(clips)] == ["a", "b", "c"]
+
+
+def test_recording_time_uses_camera_local_offset():
+    # Evening clip in Utah: metadata says 01:11 UTC on the 6th, filename (camera clock) says 18:11 on the 5th.
+    dt, source = recording_time("2026-09-06T01:11:09.000000Z", "VID_20260905_181109_117.mp4")
+    assert dt.isoformat() == "2026-09-05T18:11:09-07:00" and source == "metadata"
+    # Filename that isn't the same moment (not a whole quarter-hour offset): keep UTC.
+    dt, _ = recording_time("2026-09-06T01:11:09Z", "VID_20260905_181500_117.mp4")
+    assert dt.isoformat() == "2026-09-06T01:11:09+00:00"
+    # creation_time without a suffix is still UTC.
+    assert recording_time("2026-09-06T01:11:09", "a.mp4")[0].utcoffset().total_seconds() == 0
+    # No metadata: filename's wall clock, no offset.
+    assert recording_time(None, "VID_20260905_181109_117.mp4") == (datetime(2026, 9, 5, 18, 11, 9), "filename")
+    assert recording_time(None, "IMG_1234.mp4") == (None, "unknown")
+
+
+def test_ordering_mixes_local_utc_and_filename_times():
+    clips = [
+        clip("filename_only", when="2026-09-05T18:30:00"),  # naive: assumed to be in the trip's offset
+        clip("phone_utc", when="2026-09-06T01:15:00+00:00"),  # 18:15 in Utah
+        clip("insta_local", when="2026-09-05T18:00:00-07:00"),
+    ]
+    assert [c.name for c in sort_chronologically(clips)] == ["insta_local", "phone_utc", "filename_only"]
 
 
 def test_validate_plan_drops_clamps_merges_and_trims():

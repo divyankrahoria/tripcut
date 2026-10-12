@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -20,33 +21,49 @@ def run(args: list[str], *, quiet: bool = True, cwd: Path | None = None) -> subp
     return proc
 
 
+# Hardware decoding makes proxies of 4K HEVC footage ~5x faster on Macs.
+_HWACCEL = ["-hwaccel", "videotoolbox"] if sys.platform == "darwin" else []
+
+
 def make_proxy(src: Path, dst: Path, height: int = 480) -> Path:
-    """Small, fast-to-upload copy with identical timing, for AI analysis."""
+    """Small, fast-to-upload copy with identical timing, for AI analysis.
+
+    Always 8-bit 4:2:0: 10-bit camera footage would otherwise come out as
+    H.264 High 10, which many decoders (likely including Gemini's) reject.
+    """
     dst.parent.mkdir(parents=True, exist_ok=True)
-    run(
-        [
-            "-i",
-            str(src),
-            "-vf",
-            f"scale=-2:'min({height},ih)'",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "30",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "64k",
-            "-ac",
-            "1",
-            "-movflags",
-            "+faststart",
-            str(dst),
-        ]
-    )
-    return dst
+    final, dst = dst, dst.with_name(dst.stem + ".partial" + dst.suffix)  # an interrupted run leaves no half-proxy
+    args = [
+        "-i",
+        str(src),
+        "-vf",
+        f"scale=-2:'min({height},ih)'",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "30",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "64k",
+        "-ac",
+        "1",
+        "-movflags",
+        "+faststart",
+        str(dst),
+    ]
+    try:
+        run(_HWACCEL + args)
+    except FFmpegError:
+        if not _HWACCEL:
+            raise
+        run(args)  # hardware decoder refused this file; fall back to software
+    dst.replace(final)
+    return final
 
 
 _SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")

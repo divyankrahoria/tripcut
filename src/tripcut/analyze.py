@@ -12,15 +12,33 @@ import hashlib
 import json
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Protocol
 
 from . import ffmpeg
 from .models import ClipAnalysis, ClipInfo, Moment, TranscriptLine
-from .prompts import CLIP_PROMPT
+from .prompts import (
+    AUDIO,
+    CLIP_PROMPT,
+    CLIP_SCHEMA,
+    ENERGIES,
+    EXPOSURES,
+    FRAMINGS,
+    MOTIONS,
+    PROMPT_VERSION,
+    SHOTS,
+    STABILITY,
+    TIMES_OF_DAY,
+    TONES,
+    TRANSITIONS,
+)
 
-DEFAULT_MODEL = os.environ.get("TRIPCUT_MODEL", "gemini-2.5-flash")
+DEFAULT_MODEL = os.environ.get("TRIPCUT_MODEL", "gemini-3.8-flash")
+# The newest models are the ones that get overloaded (503); an older Flash keeps the run moving.
+FALLBACK_MODEL = os.environ.get("TRIPCUT_FALLBACK_MODEL", "gemini-3.6-flash")
+OVERLOAD_COOLDOWN = 300.0  # seconds to stay on the fallback before trying the main model again
 
 
 class Provider(Protocol):
@@ -59,6 +77,12 @@ def extract_json(text: str) -> dict[str, Any]:
     return json.loads(text[start : end + 1])
 
 
+def _one_of(value: Any, allowed: tuple[str, ...]) -> str:
+    """Normalise a label ("Golden hour" -> "golden_hour"); "" if it isn't one we know."""
+    v = str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+    return v if v in allowed else ""
+
+
 def analysis_from_json(raw: dict[str, Any], clip: ClipInfo, provider: str) -> ClipAnalysis:
     def clamp(t: Any) -> float:
         return min(max(0.0, to_seconds(t)), clip.duration)
@@ -76,7 +100,29 @@ def analysis_from_json(raw: dict[str, Any], clip: ClipInfo, provider: str) -> Cl
             score = float(m.get("score", 5))
         except (TypeError, ValueError):
             score = 5.0
-        moments.append(Moment(s, e, kind, str(m.get("description", "")), max(1.0, min(10.0, score))))
+        try:
+            peak = min(max(s, to_seconds(m["peak"])), e)  # always inside its own moment
+        except (KeyError, ValueError, TypeError):
+            peak = None
+        moments.append(
+            Moment(
+                s,
+                e,
+                kind,
+                str(m.get("description", "")),
+                max(1.0, min(10.0, score)),
+                shot=_one_of(m.get("shot"), SHOTS),
+                motion=_one_of(m.get("motion"), MOTIONS),
+                subject=str(m.get("subject") or "").strip(),
+                audio=_one_of(m.get("audio"), AUDIO),
+                framing=_one_of(m.get("framing"), FRAMINGS),
+                stability=_one_of(m.get("stability"), STABILITY),
+                exposure=_one_of(m.get("exposure"), EXPOSURES),
+                energy=_one_of(m.get("energy"), ENERGIES),
+                tone=_one_of(m.get("tone"), TONES),
+                peak=peak,
+            )
+        )
 
     transcript = []
     for t in raw.get("transcript") or []:
@@ -84,6 +130,15 @@ def analysis_from_json(raw: dict[str, Any], clip: ClipInfo, provider: str) -> Cl
             transcript.append(TranscriptLine(clamp(t["start"]), clamp(t["end"]), str(t["text"]).strip()))
         except (KeyError, ValueError, TypeError):
             continue
+
+    transitions = []
+    for t in raw.get("transitions") or []:
+        try:
+            s, e = clamp(t["start"]), clamp(t["end"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if kind := _one_of(t.get("type"), TRANSITIONS):
+            transitions.append({"start": s, "end": max(s, e), "type": kind, "note": str(t.get("note") or "")})
 
     scene = str(raw.get("scene_type") or "broll").lower()
     return ClipAnalysis(
@@ -96,6 +151,11 @@ def analysis_from_json(raw: dict[str, Any], clip: ClipInfo, provider: str) -> Cl
         moments=sorted(moments, key=lambda m: m.start),
         quality_issues=[str(q) for q in raw.get("quality_issues") or []],
         provider=provider,
+        time_of_day=_one_of(raw.get("time_of_day"), TIMES_OF_DAY),
+        people=[str(p) for p in raw.get("people") or []][:8],
+        usable=raw.get("usable") is not False,
+        visible_text=[str(t) for t in raw.get("visible_text") or []],
+        transitions=sorted(transitions, key=lambda t: t["start"]),
     )
 
 
@@ -105,7 +165,9 @@ def analysis_from_json(raw: dict[str, Any], clip: ClipInfo, provider: str) -> Cl
 class GeminiProvider:
     """Uploads a 480p proxy of each clip to Gemini and asks for a structured log."""
 
-    def __init__(self, model: str = DEFAULT_MODEL, api_key: str | None = None):
+    def __init__(
+        self, model: str = DEFAULT_MODEL, api_key: str | None = None, fallback_model: str | None = FALLBACK_MODEL
+    ):
         try:
             from google import genai
         except ImportError as e:  # pragma: no cover
@@ -120,7 +182,19 @@ class GeminiProvider:
 
         self.client = genai.Client(api_key=key)
         self.model = model
-        self.name = f"gemini:{model}"
+        self.fallback_model = fallback_model if fallback_model != model else None
+        self._local = threading.local()  # clips are analysed in parallel threads
+        self._overloaded_until = 0.0
+        self.name = f"gemini:{model}"  # cache identity stays the main model, whichever one answers
+
+    @property
+    def last_model(self) -> str:
+        """Which model answered this thread's latest request."""
+        return getattr(self._local, "model", self.model)
+
+    @last_model.setter
+    def last_model(self, value: str) -> None:
+        self._local.model = value
 
     def _wait_active(self, f, timeout: float = 600):
         deadline = time.time() + timeout
@@ -133,21 +207,28 @@ class GeminiProvider:
             raise RuntimeError(f"Gemini could not process the upload (state={f.state})")
         return f
 
-    def generate_json(self, contents: list, retries: int = 3) -> dict[str, Any]:
+    def generate_json(self, contents: list, retries: int = 3, schema: dict | None = None) -> dict[str, Any]:
         from google.genai import types
 
+        # No temperature: Gemini 3 models loop or degrade below their default of 1.0.
+        config = types.GenerateContentConfig(response_mime_type="application/json", response_json_schema=schema)
         last: Exception | None = None
         for attempt in range(retries):
+            on_fallback = self.fallback_model is not None and time.time() < self._overloaded_until
+            model = self.fallback_model if on_fallback else self.model
             try:
-                resp = self.client.models.generate_content(
-                    model=self.model,
-                    contents=contents,
-                    config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.4),
-                )
-                return extract_json(resp.text or "")
+                resp = self.client.models.generate_content(model=model, contents=contents, config=config)
+                result = extract_json(resp.text or "")
+                self.last_model = model
+                return result
             except Exception as e:  # rate limits, transient 5xx, malformed JSON
                 last = e
-                time.sleep(min(60, 5 * 2**attempt))
+                if getattr(e, "code", None) == 503 and not on_fallback and self.fallback_model:
+                    # An overloaded model can take minutes to say so; switch now instead of retrying it.
+                    self._overloaded_until = time.time() + OVERLOAD_COOLDOWN
+                    continue
+                if attempt < retries - 1:
+                    time.sleep(min(60, 5 * 2**attempt))
         raise RuntimeError(f"Gemini request failed after {retries} attempts: {last}")
 
     def analyze(self, clip: ClipInfo, workdir: Path) -> ClipAnalysis:
@@ -157,13 +238,13 @@ class GeminiProvider:
         uploaded = self._wait_active(self.client.files.upload(file=str(proxy)))
         try:
             prompt = CLIP_PROMPT.format(duration=clip.duration, created=clip.created_at or "unknown")
-            raw = self.generate_json([uploaded, prompt])
+            raw = self.generate_json([uploaded, prompt], schema=CLIP_SCHEMA)
         finally:
             try:
                 self.client.files.delete(name=uploaded.name)
             except Exception:
                 pass
-        return analysis_from_json(raw, clip, self.name)
+        return analysis_from_json(raw, clip, f"gemini:{self.last_model}")
 
 
 class LocalProvider:
@@ -227,7 +308,8 @@ def make_provider(name: str, model: str = DEFAULT_MODEL) -> Provider:
 
 def cache_key(clip: ClipInfo, provider_name: str) -> str:
     st = os.stat(clip.path)
-    h = hashlib.sha1(f"{clip.path}|{st.st_size}|{int(st.st_mtime)}|{provider_name}".encode()).hexdigest()
+    ident = f"{clip.path}|{st.st_size}|{int(st.st_mtime)}|{provider_name}|v{PROMPT_VERSION}"
+    h = hashlib.sha1(ident.encode()).hexdigest()
     return f"{Path(clip.name).stem}-{h[:10]}.json"
 
 

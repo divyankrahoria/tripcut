@@ -7,13 +7,14 @@ import os
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .models import ClipInfo
 
 VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"}
-RAW_360_EXTS = {".insv", ".lrv"}  # Insta360 raw / low-res preview files
+RAW_360_EXTS = {".insv"}  # Insta360 raw 360 video (needs reframing); .lrv low-res previews are ignored
 
 # Insta360 (and many phones) name files like VID_20260912_101530_00_012.mp4
 _FILENAME_TS = re.compile(r"(20\d{2})(\d{2})(\d{2})[_-]?(\d{2})(\d{2})(\d{2})")
@@ -80,7 +81,35 @@ def _parse_iso(value: str) -> datetime | None:
     # Cameras that don't know the date write 1970 or 1904; treat as unknown.
     if dt.year < 2005:
         return None
-    return dt
+    # MP4/QuickTime creation_time is UTC by spec, even when the suffix is missing.
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _local_offset(utc: datetime, local: datetime) -> timezone | None:
+    """The camera's UTC offset, if `local` (wall clock) and `utc` are the same moment."""
+    gap = (local - utc.astimezone(timezone.utc).replace(tzinfo=None)).total_seconds()
+    quarter = round(gap / 900) * 900  # real-world offsets are whole quarter hours
+    if abs(quarter) > 14 * 3600 or abs(gap - quarter) > 120:
+        return None
+    return timezone(timedelta(seconds=quarter))
+
+
+def recording_time(creation_time: str | None, name: str) -> tuple[datetime | None, str]:
+    """When the clip was recorded, in the camera's local time where we can tell.
+
+    Metadata is UTC; Insta360/GoPro/phone filenames use the camera's local clock.
+    With both, the gap between them is the local UTC offset, so evening clips
+    keep the right date instead of rolling over to "tomorrow" in UTC.
+    """
+    meta = _parse_iso(creation_time) if creation_time else None
+    named = timestamp_from_filename(name)
+    if meta and named and (tz := _local_offset(meta, named)):
+        return meta.astimezone(tz), "metadata"
+    if meta:
+        return meta, "metadata"
+    if named:
+        return named, "filename"
+    return None, "unknown"
 
 
 def probe(path: Path) -> ClipInfo:
@@ -113,12 +142,8 @@ def probe(path: Path) -> ClipInfo:
     tags = {k.lower(): val for k, val in (fmt.get("tags") or {}).items()}
     tags.update({k.lower(): val for k, val in (v.get("tags") or {}).items() if k.lower() not in tags})
 
-    created, source = None, "unknown"
-    if "creation_time" in tags and (dt := _parse_iso(tags["creation_time"])):
-        created, source = dt, "metadata"
-    elif dt := timestamp_from_filename(path.name):
-        created, source = dt, "filename"
-    else:
+    created, source = recording_time(tags.get("creation_time"), path.name)
+    if created is None:
         created = datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc)
         source = "mtime"
 
@@ -143,11 +168,17 @@ def probe(path: Path) -> ClipInfo:
 
 
 def sort_chronologically(clips: list[ClipInfo]) -> list[ClipInfo]:
+    # Filename-only times are local wall clock with no offset; assume the offset
+    # most of the trip was shot in (UTC if no clip tells us).
+    offsets = Counter(off for c in clips if c.created_dt and (off := c.created_dt.utcoffset()))
+    trip_tz = timezone(offsets.most_common(1)[0][0]) if offsets else timezone.utc
+
     def key(c: ClipInfo):
         dt = c.created_dt
         if dt is None:
             return (1, 0.0, c.name)
-        # Compare naive and aware datetimes safely by dropping tz (same camera, same clock).
-        return (0, dt.replace(tzinfo=None).timestamp(), c.name)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=trip_tz)
+        return (0, dt.timestamp(), c.name)
 
     return sorted(clips, key=key)
