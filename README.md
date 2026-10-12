@@ -24,7 +24,12 @@ You came back from a trip with 200 clips. Some are you talking to the camera, mo
 tripcut run ~/Videos/portugal-trip
 ```
 
-It **watches and listens** to every clip, works out what's in each one (places, what you said, which moments are actually good), **plans a story** in recorded order, and **renders** a finished video with music that ducks under your voice, place-name captions, and clean cuts. It never cuts you off mid-sentence.
+It **watches and listens** to every clip, works out what's in each one (places, what you said, which moments are actually good), **plans a story** in recorded order, and **renders** a rough draft with music that ducks under your voice, place-name captions, and clean cuts. It never cuts you off mid-sentence.
+
+**Two ways to use it:**
+
+- **Rough draft, fully automatic.** `tripcut run` goes from a folder of clips to a watchable first cut, plus a storyboard and a timeline you can finish in Resolve or Premiere. Good for a quick share or to see what you've got.
+- **Finished film.** tripcut does the watching (and the final export); Claude edits in [Palmier Pro](https://github.com/palmier-io/palmier-pro) and you direct. See [Edit in Palmier Pro with Claude](#edit-in-palmier-pro-with-claude).
 
 Unlike template-based auto-editors that only score how a shot *looks*, tripcut understands *what happens*: "open on the wide shot of the cliffs, then cut to you explaining where you are."
 
@@ -32,7 +37,7 @@ Unlike template-based auto-editors that only score how a shot *looks*, tripcut u
 
 | | |
 |---|---|
-| **`portugal-trip-tripcut.mp4`** | A finished edit: 16:9, or 9:16 for Reels/Shorts |
+| **`portugal-trip-tripcut.mp4`** | A rough-draft edit: 16:9, or 9:16 for Reels/Shorts |
 | **`storyboard.md`** | Every shot, why it was picked, and where it sits |
 | **`plan.json`** | The edit as data. Reorder or delete shots, re-render in seconds |
 | **`timeline.edl`** | Import into DaVinci Resolve / Premiere and finish it by hand |
@@ -87,7 +92,17 @@ flowchart LR
 
 ## Edit in Palmier Pro with Claude
 
-For a hand-finished film, use tripcut as the eyes and let Claude do the editing. Gemini logs every clip once; [Claude Code](https://claude.com/claude-code) reads that log and drives **Palmier Pro** through its MCP server to cut, grade, title and export. You review in Palmier and ask for changes in plain English.
+For a hand-finished film, use tripcut as the eyes and let Claude do the editing. Gemini logs every clip once; [Claude Code](https://claude.com/claude-code) reads that log and drives [Palmier Pro](https://github.com/palmier-io/palmier-pro) through its MCP server to cut, grade, title and export. You review in Palmier and ask for changes in plain English.
+
+**What you need:**
+
+1. **A Mac.** Palmier Pro is a native macOS app.
+2. **tripcut** and a Gemini API key (see [Quickstart](#quickstart)).
+3. **Palmier Pro**, a separate free video editor: download [PalmierPro.dmg](https://github.com/palmier-io/palmier-pro/releases/latest/download/PalmierPro.dmg), drag it to Applications, and keep it open while you edit. The free tier is enough.
+4. **Claude Code** (needs a paid Claude plan), connected to Palmier once:
+   ```bash
+   claude mcp add --scope user --transport http palmier-pro http://127.0.0.1:19789/mcp
+   ```
 
 ```mermaid
 flowchart LR
@@ -222,6 +237,11 @@ pip install -e ".[dev]"
 pytest            # generates synthetic clips with FFmpeg, no API key needed
 ruff check . && ruff format --check .
 ```
+
+## Thanks
+
+- [**Palmier Pro**](https://github.com/palmier-io/palmier-pro) for the video editor and its MCP server, which make the hands-on editing workflow possible.
+- [FFmpeg](https://ffmpeg.org) for every cut, crop and encode, and [Google Gemini](https://ai.google.dev) for watching the footage.
 
 ## License
 
